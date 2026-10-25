@@ -14,7 +14,7 @@
     Personal: { emoji: '✦', color: '#eaf5f6', ink: '#4b9da0' }
   };
   const $ = (selector) => document.querySelector(selector);
-  const state = { routines: [], completions: {}, database: null, editingId: null, toastTimer: null };
+  const state = { routines: [], completions: {}, database: null, editingId: null, outcomeId: null, toastTimer: null };
   const today = () => dateKey(new Date());
   const dateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const parseDate = (key) => { const [year, month, day] = key.split('-').map(Number); return new Date(year, month - 1, day); };
@@ -121,8 +121,22 @@
     return false;
   }
 
+  function outcomeFor(routine, key) {
+    const value = state.completions[key] && state.completions[key][routine.id];
+    if (value === true) return { status: 'completed', reason: '' };
+    if (value && typeof value === 'object' && ['completed', 'partial', 'incomplete'].includes(value.status)) return value;
+    return null;
+  }
+
   function isCompleted(routine, key) {
-    return Boolean(state.completions[key] && state.completions[key][routine.id]);
+    return outcomeFor(routine, key)?.status === 'completed';
+  }
+
+  function progressValue(routine, key) {
+    const status = outcomeFor(routine, key)?.status;
+    if (status === 'completed') return 1;
+    if (status === 'partial') return 0.5;
+    return 0;
   }
 
   function completionRatio(routine, from, to) {
@@ -139,7 +153,9 @@
   }
 
   function periodStats(from, to) {
+    let progress = 0;
     let completed = 0;
+    let partial = 0;
     let target = 0;
     state.routines.forEach((routine) => {
       const stats = completionRatio(routine, from, to);
@@ -148,8 +164,14 @@
         target += Math.min(stats.scheduled, Number(routine.weeklyTarget || 3) * weeks);
       } else target += stats.scheduled;
       completed += stats.completed;
+      for (let date = new Date(from); date <= to; date = shiftDate(date, 1)) {
+        if (!isScheduled(routine, date)) continue;
+        const key = dateKey(date);
+        progress += progressValue(routine, key);
+        if (outcomeFor(routine, key)?.status === 'partial') partial += 1;
+      }
     });
-    return { completed, target, percent: target ? Math.round(completed / target * 100) : 0 };
+    return { completed, partial, target, percent: target ? Math.round(progress / target * 100) : 0 };
   }
 
   function streakStats(routine) {
@@ -204,10 +226,11 @@
   function renderProgress() {
     const routines = state.routines.filter(eligibleToday);
     const done = routines.filter((routine) => isCompleted(routine, today())).length;
-    const percentage = routines.length ? Math.round(done / routines.length * 100) : 0;
+    const partial = routines.filter((routine) => outcomeFor(routine, today())?.status === 'partial').length;
+    const percentage = routines.length ? Math.round(routines.reduce((sum, routine) => sum + progressValue(routine, today()), 0) / routines.length * 100) : 0;
     $('#progress-percent').textContent = `${percentage}%`;
-    $('#progress-count').textContent = `${done} of ${routines.length} routines`;
-    $('#progress-message').textContent = percentage === 100 && routines.length ? 'Beautifully done. You showed up.' : done ? 'You’re building lovely momentum.' : 'Your first win is waiting.';
+    $('#progress-count').textContent = `${done} done${partial ? ` · ${partial} partial` : ''} of ${routines.length}`;
+    $('#progress-message').textContent = percentage === 100 && routines.length ? 'Beautifully done. You showed up.' : done || partial ? 'You’re building lovely momentum.' : 'Your first win is waiting.';
     $('#progress-ring').style.setProperty('--progress', `${percentage * 3.6}deg`);
     $('#progress-ring').setAttribute('aria-label', `${percentage}% complete`);
     $('#progress-bar').style.width = `${percentage}%`;
@@ -216,14 +239,15 @@
     const weekEnd = shiftDate(week, 6);
     const weekly = periodStats(week, weekEnd);
     $('#weekly-percent').textContent = `${weekly.percent}%`;
-    $('#weekly-caption').textContent = `${weekly.completed} routine${weekly.completed === 1 ? '' : 's'} completed`;
+    $('#weekly-caption').textContent = `${weekly.completed} done${weekly.partial ? ` · ${weekly.partial} partial` : ''} this week`;
     $('#week-bars').innerHTML = Array.from({ length: 7 }, (_, index) => {
       const date = shiftDate(week, index);
       const dayRoutines = state.routines.filter((routine) => isScheduled(routine, date));
       const completed = dayRoutines.filter((routine) => isCompleted(routine, dateKey(date))).length;
-      const height = dayRoutines.length ? Math.max(7, Math.round(completed / dayRoutines.length * 100)) : 3;
+      const ratio = dayRoutines.length ? dayRoutines.reduce((sum, routine) => sum + progressValue(routine, dateKey(date)), 0) / dayRoutines.length : 0;
+      const height = dayRoutines.length ? Math.max(7, Math.round(ratio * 100)) : 3;
       const classes = `${dateKey(date) === today() ? 'today' : ''} ${date > new Date() ? 'future' : ''}`;
-      return `<div class="week-bar ${classes}" title="${date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}: ${completed}/${dayRoutines.length}"><span style="height:${height}%"></span></div>`;
+      return `<div class="week-bar ${classes}" title="${date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}: ${completed}/${dayRoutines.length} complete"><span style="height:${height}%"></span></div>`;
     }).join('');
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const monthly = periodStats(monthStart, new Date());
@@ -245,16 +269,19 @@
     $('#routine-list').innerHTML = routines.map((routine) => {
       const style = categories[routine.category] || categories.Personal;
       const done = isCompleted(routine, today());
+      const outcome = outcomeFor(routine, today());
       const streak = streakStats(routine);
       const time = routine.startTime ? new Date(`2000-01-01T${routine.startTime}`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : routine.block;
       const details = [routine.block, time].filter((item, index, values) => item !== 'Anytime' && (index === 0 || item !== values[0]));
       const cadence = routine.frequency === 'specific' ? (routine.days || []).map((day) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]).join(', ') : routine.frequency === 'weekly' ? `${routine.weeklyTarget || 3}× per week` : 'Every day';
       const schedule = details.length ? details.join(' · ') : 'Anytime';
+      const statusLabel = outcome?.status === 'partial' ? 'Partial' : outcome?.status === 'incomplete' ? 'Incomplete' : done ? 'Completed' : streak.current ? `✦ ${streak.current} ${streak.unit}` : 'Up next';
+      const statusTitle = outcome?.reason ? ` title="${escapeHtml(outcome.reason)}"` : '';
       return `<article class="routine-item ${done ? 'is-complete' : ''}">
         <button class="check-button ${done ? 'checked' : ''}" data-action="toggle" data-id="${escapeHtml(routine.id)}" type="button" aria-label="${done ? 'Mark incomplete' : 'Mark complete'}: ${escapeHtml(routine.name)}" aria-pressed="${done}">${done ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.2 3 3 6-6.2"/></svg>' : ''}</button>
         <div class="routine-emoji" style="background:${style.color};color:${style.ink}">${style.emoji}</div>
         <div class="routine-copy"><h3>${escapeHtml(routine.name)}</h3><div class="routine-meta"><span class="category-tag" style="background:${style.color};color:${style.ink}">${escapeHtml(routine.category)}</span><span class="meta-dot">·</span><span>${escapeHtml(schedule)}</span><span class="meta-dot">·</span><span>${escapeHtml(cadence)}</span></div></div>
-        <div class="routine-side"><span class="routine-status ${done ? 'done' : ''}">${done ? 'Completed' : streak.current ? `✦ ${streak.current} ${streak.unit}` : 'Up next'}</span><button class="routine-menu" data-action="edit" data-id="${escapeHtml(routine.id)}" type="button" aria-label="Edit ${escapeHtml(routine.name)}">···</button></div>
+        <div class="routine-side"><span class="routine-status ${done ? 'done' : outcome?.status || ''}"${statusTitle}>${escapeHtml(statusLabel)}</span><button class="routine-menu" data-action="outcome" data-id="${escapeHtml(routine.id)}" type="button" aria-label="Add a partial or incomplete check-in for ${escapeHtml(routine.name)}">···</button><button class="routine-edit" data-action="edit" data-id="${escapeHtml(routine.id)}" type="button" aria-label="Edit ${escapeHtml(routine.name)}">✎</button></div>
       </article>`;
     }).join('');
   }
@@ -269,7 +296,7 @@
     for (let date = new Date(first); date <= end; date = shiftDate(date, 1)) {
       const key = dateKey(date);
       const scheduled = state.routines.filter((routine) => isScheduled(routine, date));
-      totalDays[key] = scheduled.length ? scheduled.filter((routine) => isCompleted(routine, key)).length / scheduled.length : 0;
+      totalDays[key] = scheduled.length ? scheduled.reduce((sum, routine) => sum + progressValue(routine, key), 0) / scheduled.length : 0;
     }
     let activeDays = 0;
     for (let date = new Date(gridStart); date <= end; date = shiftDate(date, 1)) {
@@ -338,6 +365,18 @@
     $('#routine-name').focus();
   }
 
+  function openOutcomeDialog(routine) {
+    state.outcomeId = routine.id;
+    const existing = outcomeFor(routine, today());
+    $('#outcome-title').textContent = routine.name;
+    $('#outcome-description').textContent = 'If you didn’t finish the routine, record what happened. A partial check-in counts as half progress; an incomplete check-in keeps the reason in your history.';
+    $('#outcome-status').value = existing?.status === 'incomplete' ? 'incomplete' : 'partial';
+    $('#outcome-reason').value = existing?.status === 'partial' || existing?.status === 'incomplete' ? existing.reason || '' : '';
+    $('#outcome-error').textContent = '';
+    $('#outcome-dialog').showModal();
+    $('#outcome-reason').focus();
+  }
+
   function updateFrequencyFields() {
     const frequency = $('#routine-frequency').value;
     $('#days-field').hidden = frequency !== 'specific';
@@ -378,13 +417,31 @@
 
   async function toggleRoutine(id) {
     if (!state.completions[today()]) state.completions[today()] = {};
-    const completed = !state.completions[today()][id];
-    if (completed) state.completions[today()][id] = true;
+    const completed = !isCompleted({ id }, today());
+    if (completed) state.completions[today()][id] = { status: 'completed', reason: '' };
     else delete state.completions[today()][id];
     try { await persist(); } catch { return; }
     render();
     const routine = state.routines.find((item) => item.id === id);
     showToast(completed ? `${routine.name} — nicely done!` : 'Routine marked as incomplete.');
+  }
+
+  async function submitOutcome(event) {
+    event.preventDefault();
+    const reason = $('#outcome-reason').value.trim();
+    if (!reason) {
+      $('#outcome-error').textContent = 'Add a short reason before saving your check-in.';
+      $('#outcome-reason').focus();
+      return;
+    }
+    const status = $('#outcome-status').value;
+    if (!state.completions[today()]) state.completions[today()] = {};
+    state.completions[today()][state.outcomeId] = { status, reason };
+    try { await persist(); } catch { return; }
+    $('#outcome-dialog').close();
+    const routine = state.routines.find((item) => item.id === state.outcomeId);
+    render();
+    showToast(`${routine.name}: ${status === 'partial' ? 'partial progress saved.' : 'incomplete check-in saved.'}`);
   }
 
   async function deleteRoutine() {
@@ -439,8 +496,11 @@
     const routine = state.routines.find((item) => item.id === button.dataset.id);
     if (!routine) return;
     if (button.dataset.action === 'toggle') toggleRoutine(routine.id);
+    else if (button.dataset.action === 'outcome') openOutcomeDialog(routine);
     else openRoutineDialog(routine);
   });
+  $('#outcome-form').addEventListener('submit', submitOutcome);
+  document.querySelectorAll('.outcome-close,.outcome-cancel').forEach((button) => button.addEventListener('click', () => $('#outcome-dialog').close()));
   $('#export-button').addEventListener('click', exportData);
   $('#import-button').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', (event) => { if (event.target.files[0]) importData(event.target.files[0]); });

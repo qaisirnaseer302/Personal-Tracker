@@ -136,6 +136,27 @@
         <div class="dialog-actions"><button class="delete-button" id="delete-routine-button" type="button" hidden>Delete routine</button><button class="secondary-button dialog-cancel" type="button">Cancel</button><button class="primary-button" type="submit">Save routine <span>→</span></button></div>
       </form>
     </dialog>
+    <dialog class="outcome-dialog" id="outcome-dialog">
+      <form id="outcome-form">
+        <div class="dialog-header">
+          <div><span class="card-kicker">TODAY'S CHECK-IN</span><h2 id="outcome-title">Update routine</h2></div>
+          <button class="icon-button outcome-close" type="button" aria-label="Close">×</button>
+        </div>
+        <p class="outcome-description" id="outcome-description"></p>
+        <label class="field-label" for="outcome-status">How did it go?</label>
+        <select class="text-input" id="outcome-status" name="status">
+          <option value="partial">Partially completed</option>
+          <option value="incomplete">Not completed</option>
+        </select>
+        <label class="field-label outcome-reason-label" for="outcome-reason">What happened?</label>
+        <textarea class="text-input outcome-reason" id="outcome-reason" name="reason" maxlength="240" placeholder="Add a quick note about how it went…" required></textarea>
+        <div class="form-error" id="outcome-error" role="alert"></div>
+        <div class="dialog-actions">
+          <button class="secondary-button outcome-cancel" type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save check-in <span>→</span></button>
+        </div>
+      </form>
+    </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
