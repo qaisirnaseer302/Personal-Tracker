@@ -509,12 +509,13 @@
     localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
     $('#theme-icon').textContent = dark ? '☀' : '☾';
     $('#theme-label').textContent = dark ? 'Light appearance' : 'Dark appearance';
+    $('#theme-toggle').setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} appearance`);
   });
   document.querySelectorAll('.nav-link[href^="#"]').forEach((link) => link.addEventListener('click', () => {
     document.querySelectorAll('.nav-link').forEach((item) => item.classList.remove('active'));
     link.classList.add('active');
   }));
-  if (localStorage.getItem(THEME_KEY) === 'dark') { document.body.classList.add('dark'); $('#theme-icon').textContent = '☀'; $('#theme-label').textContent = 'Light appearance'; }
+  if (localStorage.getItem(THEME_KEY) === 'dark') { document.body.classList.add('dark'); $('#theme-icon').textContent = '☀'; $('#theme-label').textContent = 'Light appearance'; $('#theme-toggle').setAttribute('aria-label', 'Switch to light appearance'); }
 
   initialize();
   window.setInterval(() => {
